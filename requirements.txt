@@ -1,0 +1,8 @@
+PySide6>=6.5.0
+pyttsx3>=2.90
+SpeechRecognition>=3.10.0
+PyAudio>=0.2.14
+pywin32>=306
+plyer>=2.1.0
+python-dotenv>=1.0.0
+google-generativeai>=0.3.0
