@@ -78,6 +78,7 @@ def main():
     sys_exit_code = app.exec()
     
     # Clean shutdown of speech thread on exit
+    assistant.shutdown()
     tts.stop()
     sys.exit(sys_exit_code)
 

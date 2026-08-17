@@ -82,6 +82,17 @@ class CommandRouter:
             self.tts.speak(response)
             return response
 
+        # 12. Complete Task checklist verbally
+        if "complete next task" in cmd or "finish next task" in cmd:
+            next_item = self.planner.get_next_task()
+            if next_item:
+                self.db.update_schedule_item_status(next_item['id'], 'Completed')
+                response = f"I have marked task {next_item['task_name']} as completed."
+            else:
+                response = "I couldn't find a pending task to complete."
+            self.tts.speak(response)
+            return response
+
         # 8. What's next / What is my schedule today / What should I study now
         if "next" in cmd or "what should i work on" in cmd or "what should i study now" in cmd:
             next_item = self.planner.get_next_task()
@@ -163,16 +174,7 @@ class CommandRouter:
             self.tts.speak(response)
             return response
 
-        # 12. Complete Task checklist verbally
-        if "complete next task" in cmd or "finish next task" in cmd:
-            next_item = self.planner.get_next_task()
-            if next_item:
-                self.db.update_schedule_item_status(next_item['id'], 'Completed')
-                response = f"I have marked task {next_item['task_name']} as completed."
-            else:
-                response = "I couldn't find a pending task to complete."
-            self.tts.speak(response)
-            return response
+
 
         # 13. Current Time lookup
         if cmd in ["what time is it", "current time", "what is the time"]:

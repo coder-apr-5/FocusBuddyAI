@@ -3,6 +3,7 @@ import sys
 from datetime import datetime, timedelta
 from PySide6.QtCore import QObject, Signal, QTimer, Slot, Qt, QMetaObject, Q_ARG
 from app.core.context import ContextManager
+from app.voice.wake_word import WakeWordThread
 
 class AssistantEngine(QObject):
     # Signals for the GUI
@@ -45,6 +46,11 @@ class AssistantEngine(QObject):
         self.ticker.timeout.connect(self._on_tick)
         self.ticker.start(1000)
         
+        # Background Wake Word Thread
+        self.wake_word_thread = WakeWordThread(self.config)
+        self.wake_word_thread.wake_word_detected.connect(self._on_wake_word_detected)
+        self.wake_word_thread.start()
+        
         # Connect to sub-module signals
         self._connect_signals()
         
@@ -62,10 +68,27 @@ class AssistantEngine(QObject):
 
     def set_state(self, new_state):
         if self.current_state != new_state:
-            self.add_log("State", f"Transitioned from {self.current_state} to {new_state}")
+            old_state = self.current_state
+            self.add_log("State", f"Transitioned from {old_state} to {new_state}")
             self.current_state = new_state
             self.state_changed.emit(new_state)
             self._update_gui_status()
+            
+            # Pause wake-word thread when recording in conversation mode, resume when active session ends
+            if new_state == "CONVERSATION_MODE":
+                self.wake_word_thread.pause_listening()
+            elif old_state == "CONVERSATION_MODE" and new_state in ["IDLE", "FOCUS_ACTIVE", "BREAK_ACTIVE"]:
+                self.wake_word_thread.resume_listening()
+
+    def _on_wake_word_detected(self):
+        if self.current_state not in ["CONVERSATION_MODE", "USER_STUCK"]:
+            self._speak_and_log("System", "Yes? I'm listening.", state="CONVERSATION_MODE")
+            self._trigger_conversational_listening("Yes? I'm listening.")
+
+    def shutdown(self):
+        self.ticker.stop()
+        self.conversation_timer.stop()
+        self.wake_word_thread.stop()
 
     def _update_gui_status(self):
         """Maps internal Assistant State to user-facing GUI status."""
@@ -118,18 +141,32 @@ class AssistantEngine(QObject):
     def _process_stt_result_on_main(self, text, success):
         if not success:
             self.add_log("Voice Error", text)
-            self._update_gui_status()
-            # If we timed out or failed in conversation mode, go back to IDLE
+            # If the error is a service error or microphone missing error, do not retry, just exit
+            if any(x in text.lower() for x in ["unavailable", "no microphone", "error"]):
+                self._update_gui_status()
+                if self.current_state == "CONVERSATION_MODE":
+                    self.set_state("IDLE")
+                return
+            
+            # If it's just a silence or understanding error, speak the retry prompt and listen again!
             if self.current_state == "CONVERSATION_MODE":
-                self.set_state("IDLE")
+                self.tts.speak(text)
+                self.add_log("Assistant", text)
+                self.response_emitted.emit(text)
+                self.conversation_timer.start(7000)
+                self.gui_status_changed.emit("In Conversation")
+                self._trigger_conversational_listening(text)
+            else:
+                self._update_gui_status()
             return
             
         self.context_manager.add_message("user", text)
         self.add_log("User Input", f'"{text}"')
         self.gui_status_changed.emit("Thinking")
         
-        # Route the command
-        response = self.router.route(text)
+        # Route the command with compiled context
+        context_json = self.context_manager.get_context_json(self)
+        response = self.router.route(text, context_json)
         
         self.gui_status_changed.emit("Speaking")
         if response == "__TRIGGER_STUCK_MODE__":
@@ -146,11 +183,28 @@ class AssistantEngine(QObject):
             if self.current_state == "CONVERSATION_MODE":
                 self.conversation_timer.start(7000)
                 self.gui_status_changed.emit("In Conversation")
+                self._trigger_conversational_listening(response)
+
+    def _trigger_conversational_listening(self, response_text):
+        # Calculate speaking duration (160 words/min = 2.67 words/sec)
+        words = len(response_text.split())
+        seconds = (words / 2.67) + 1.2
+        QTimer.singleShot(int(seconds * 1000), self._start_listening_slot)
+
+    @Slot()
+    def _start_listening_slot(self):
+        if self.current_state == "CONVERSATION_MODE":
+            from app.voice.stt import STTEngine
+            stt = STTEngine(self.config)
+            stt.listen_and_transcribe(self._handle_stt_result)
+            self.gui_status_changed.emit("Listening")
+            self.conversation_timer.start(7000)
 
     def _on_conversation_timeout(self):
         if self.current_state == "CONVERSATION_MODE":
             self.add_log("Voice", "Conversation timed out due to silence.")
             self.set_state("IDLE")
+            self.tts.speak("Goodbye. Feel free to speak to me again when you need support.")
 
     # --- TIMER SIGNALS INTERACTION ---
     def _on_timer_tick(self, minutes, seconds, progress):
