@@ -21,13 +21,22 @@ class PlannerEngine:
                 return item
         return None
 
-    def postpone_next_task(self, time_str: str) -> bool:
+    def postpone_next_task(self, time_str: str = None) -> bool:
         """Postpones the next task to a new start time."""
         next_task = self.get_next_task()
         if next_task:
             self.db.update_schedule_item_status(next_task['id'], 'Rescheduled')
             # Add a new schedule item at the new time
             today_str = datetime.now().strftime("%Y-%m-%d")
+            
+            if not time_str:
+                # Default to 1 hour from now, rounded to the next 30 minutes
+                now = datetime.now()
+                future_time = now + timedelta(hours=1)
+                minute = 30 if future_time.minute >= 30 else 0
+                future_time = future_time.replace(minute=minute, second=0, microsecond=0)
+                time_str = future_time.strftime("%H:%M")
+                
             self.db.add_schedule_item(
                 task_name=next_task['task_name'],
                 start_time=time_str,
@@ -38,6 +47,39 @@ class PlannerEngine:
             )
             return True
         return False
+
+    def reschedule_task(self, task_id: int, new_time_str: str = None) -> bool:
+        """Reschedules a specific schedule item to a new start time today."""
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM schedule_items WHERE id = ?", (task_id,))
+            item = cursor.fetchone()
+            if not item:
+                return False
+                
+            # Update current item status to 'Rescheduled'
+            self.db.update_schedule_item_status(task_id, 'Rescheduled')
+            
+            # Calculate new time if not provided (1 hour from now rounded to nearest 30 mins)
+            if not new_time_str:
+                now = datetime.now()
+                future_time = now + timedelta(hours=1)
+                minute = 30 if future_time.minute >= 30 else 0
+                future_time = future_time.replace(minute=minute, second=0, microsecond=0)
+                new_time_str = future_time.strftime("%H:%M")
+                
+            self.db.add_schedule_item(
+                task_name=item['task_name'],
+                start_time=new_time_str,
+                duration_minutes=item['duration_minutes'],
+                priority=item['priority'],
+                date=item['date'],
+                status='Pending'
+            )
+            return True
+        finally:
+            conn.close()
 
     def generate_daily_schedule(self):
         """

@@ -16,6 +16,7 @@ from app.ai.provider import RuleBasedProvider, LLMProvider
 from app.core.commands import CommandRouter
 from app.ui.main_window import MainWindow
 from app.ui.dialogs.setup_dialog import SetupDialog
+from app.core.assistant import AssistantEngine
 
 def main():
     # 1. Initialize PySide6 Application
@@ -52,6 +53,10 @@ def main():
     # 8. Boot Command Router
     router = CommandRouter(db, timer, planner, tts, ai_provider)
     
+    # 8.5. Boot Assistant Engine
+    assistant = AssistantEngine(db, config, timer, scheduler, tts, notifier, planner, router)
+    assistant.ai = ai_provider
+    
     # 9. First Launch check
     if config.get("first_launch", True):
         # Open first launch wizard dialog
@@ -66,7 +71,7 @@ def main():
         scheduler.apply_website_blocking()
 
     # 11. Create & Show Dashboard Main Window
-    main_window = MainWindow(db, config, timer, scheduler, tts, notifier, router, ai_provider)
+    main_window = MainWindow(assistant)
     main_window.show()
 
     # 12. Run Qt Event Loop

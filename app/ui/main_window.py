@@ -18,16 +18,17 @@ from app.ui.dialogs.settings_dialog import SettingsDialog
 from app.ui.widgets.stuck_widget import StuckWidget
 
 class MainWindow(QMainWindow):
-    def __init__(self, db, config, timer, scheduler, tts, notifier, command_router, ai_provider):
+    def __init__(self, assistant):
         super().__init__()
-        self.db = db
-        self.config = config
-        self.timer = timer
-        self.scheduler = scheduler
-        self.tts = tts
-        self.notifier = notifier
-        self.router = command_router
-        self.ai = ai_provider
+        self.assistant = assistant
+        self.db = assistant.db
+        self.config = assistant.config
+        self.timer = assistant.timer
+        self.scheduler = assistant.scheduler
+        self.tts = assistant.tts
+        self.notifier = assistant.notifier
+        self.router = assistant.router
+        self.ai = assistant.ai
         
         self.setWindowTitle("FocusBuddy AI")
         self.setMinimumSize(950, 650)
@@ -250,6 +251,13 @@ class MainWindow(QMainWindow):
         self.lbl_response = QLabel("Ready.", self)
         self.lbl_response.setStyleSheet("color: #3b82f6; font-weight: 600; padding-left: 10px;")
         right_panel.addWidget(self.lbl_response)
+
+        # Assistant Activity Log Box
+        self.activity_log = QListWidget(self)
+        self.activity_log.setObjectName("ActivityLog")
+        self.activity_log.setFixedHeight(120)
+        self.activity_log.setStyleSheet("background-color: #1a1a1e; border: 1px solid #2e2e38; border-radius: 8px; font-size: 11px; color: #a1a1aa;")
+        right_panel.addWidget(self.activity_log)
         
         main_layout.addLayout(right_panel)
 
@@ -307,15 +315,18 @@ class MainWindow(QMainWindow):
                 self.activateWindow()
 
     def connect_signals(self):
-        # Focus Timer Signals
-        self.timer.tick.connect(self.update_timer_display)
-        self.timer.state_changed.connect(self.update_timer_state)
-        self.timer.session_completed.connect(self.timer_session_completed)
+        # Assistant Engine Signals
+        self.assistant.state_changed.connect(self.update_assistant_state)
+        self.assistant.gui_status_changed.connect(self.update_gui_status)
+        self.assistant.log_added.connect(self.add_activity_log)
+        self.assistant.timer_updated.connect(self.update_timer_display)
+        self.assistant.countdowns_updated.connect(self.refresh_countdowns)
+        self.assistant.response_emitted.connect(self.handle_assistant_response)
+        self.assistant.schedule_updated.connect(self.refresh_dashboard)
+        self.assistant.stuck_wizard_triggered.connect(self.trigger_stuck_wizard)
         
-        # Scheduler Signals
+        # Scheduler distraction warnings can still be listened to directly for dialogs
         self.scheduler.distraction_detected.connect(self.distraction_warning)
-        self.scheduler.countdowns_updated.connect(self.refresh_countdowns)
-        self.scheduler.schedule_alert.connect(self.handle_schedule_alert)
 
     # --- BUTTON TRIGGERS ---
     def timer_start_clicked(self):
@@ -348,32 +359,40 @@ class MainWindow(QMainWindow):
         self.refresh_dashboard()
 
     def mic_clicked(self):
-        self.lbl_response.setText("Listening...")
-        self.btn_mic.setEnabled(False)
+        self.assistant.trigger_voice_input()
+
+    def update_assistant_state(self, state):
+        pass
+
+    def update_gui_status(self, status):
+        self.lbl_status.setText(f"Assistant: {status}")
         
-        # Audio STT is run on a background thread so the GUI does not lock up
-        from app.voice.stt import STTEngine
-        stt = STTEngine(self.config)
-        stt.listen_and_transcribe(self.handle_stt_result)
-
-    def handle_stt_result(self, text, success):
-        # Execute routing on the main thread
-        # pyrefly: ignore [missing-import]
-        from PySide6.QtCore import QMetaObject, Q_ARG
-        QMetaObject.invokeMethod(self, "process_stt_result_on_main", 
-                                 Qt.ConnectionType.QueuedConnection, 
-                                 Q_ARG(str, text), 
-                                 Q_ARG(bool, success))
-
-    @Slot(str, bool)
-    def process_stt_result_on_main(self, text, success):
-        self.btn_mic.setEnabled(True)
-        if success:
-            self.cmd_input.setText(text)
-            self.execute_text_command(text)
+        # Color code status label
+        colors = {
+            "Ready": "color: #a1a1aa; background-color: #1e1e24;",
+            "Listening": "color: #ffffff; background-color: #ef4444;",
+            "Thinking": "color: #ffffff; background-color: #3b82f6;",
+            "Speaking": "color: #ffffff; background-color: #10b981;",
+            "Focus Active": "color: #ffffff; background-color: #1d4ed8;",
+            "In Conversation": "color: #ffffff; background-color: #d97706;"
+        }
+        self.lbl_status.setStyleSheet(colors.get(status, colors["Ready"]) + " padding: 5px 12px; border-radius: 12px; font-weight: bold;")
+        
+        # Visual mic state
+        if status == "Listening":
+            self.btn_mic.setStyleSheet("background-color: #ef4444; border-color: #dc2626; padding: 10px; color: white; font-weight: bold;")
+        elif status == "In Conversation":
+            self.btn_mic.setStyleSheet("background-color: #d97706; border-color: #b45309; padding: 10px; color: white; font-weight: bold;")
         else:
-            self.lbl_response.setText(text)
-            self.tts.speak(text)
+            self.btn_mic.setStyleSheet("background-color: #10b981; border-color: #059669; padding: 10px; color: white;")
+
+    def add_activity_log(self, timestamp, message):
+        item_text = f"{timestamp} — {message}"
+        self.activity_log.addItem(item_text)
+        self.activity_log.scrollToBottom()
+
+    def handle_assistant_response(self, text):
+        self.lbl_response.setText(text)
 
     def submit_text_command(self):
         text = self.cmd_input.text().strip()
@@ -382,13 +401,20 @@ class MainWindow(QMainWindow):
             self.execute_text_command(text)
 
     def execute_text_command(self, text):
+        self.assistant.add_log("User Input (Text)", f'"{text}"')
+        self.assistant.gui_status_changed.emit("Thinking")
         response = self.router.route(text)
+        self.assistant.gui_status_changed.emit("Speaking")
         if response == "__TRIGGER_STUCK_MODE__":
+            self.assistant.add_log("Assistant", "Triggering Stuck Recovery Mode.")
+            self.assistant.set_state("USER_STUCK")
             self.trigger_stuck_wizard()
             self.lbl_response.setText("Stuck mode opened.")
         else:
+            self.assistant.add_log("Assistant", response)
             self.lbl_response.setText(response)
         self.refresh_dashboard()
+        self.assistant.gui_status_changed.emit("Ready")
 
     # --- WIZARDS & DIALOGS ---
     def trigger_stuck_wizard(self):
