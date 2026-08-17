@@ -12,7 +12,7 @@ from app.focus.timer import FocusTimer
 from app.planner.engine import PlannerEngine
 from app.scheduler.manager import SchedulerManager
 from app.notifications.notifier import NotificationManager
-from app.ai.provider import RuleBasedProvider, LLMProvider
+from app.ai.orchestrator import AIOrchestrator
 from app.core.commands import CommandRouter
 from app.ui.main_window import MainWindow
 from app.ui.dialogs.setup_dialog import SetupDialog
@@ -41,14 +41,9 @@ def main():
     # 6. Boot Alert System
     notifier = NotificationManager(config, tts)
     
-    # 7. Boot AI Provider (LLM if configured, otherwise Rule-Based)
-    rule_ai = RuleBasedProvider()
-    api_key = config.get("gemini_api_key", "")
-    
-    if api_key:
-        ai_provider = LLMProvider(api_key, rule_ai)
-    else:
-        ai_provider = rule_ai
+    # 7. Boot AI Provider (LLM Orchestrator with sequence chain fallback)
+    from app.ai.orchestrator import AIOrchestrator
+    ai_provider = AIOrchestrator(config)
         
     # 8. Boot Command Router
     router = CommandRouter(db, timer, planner, tts, ai_provider)

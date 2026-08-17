@@ -93,6 +93,13 @@ class CommandRouter:
             self.tts.speak(response)
             return response
 
+        # 12.5. Stress Recovery Break
+        if any(x in cmd for x in ["stressed", "tired", "anxious", "exhausted", "stress"]):
+            self.timer.start_break(10)
+            response = "I hear you. Let's start a ten-minute stress recovery break. Close your eyes. Inhale for four seconds... hold... exhale... Let's release the tension."
+            self.tts.speak(response)
+            return response
+
         # 8. What's next / What is my schedule today / What should I study now
         if "next" in cmd or "what should i work on" in cmd or "what should i study now" in cmd:
             next_item = self.planner.get_next_task()

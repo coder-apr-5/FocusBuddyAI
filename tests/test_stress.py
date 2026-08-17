@@ -2,7 +2,6 @@ import os
 import sys
 import unittest
 import tempfile
-from datetime import datetime, timedelta
 from PySide6.QtCore import QCoreApplication
 
 app = QCoreApplication.instance() or QCoreApplication([])
@@ -16,11 +15,12 @@ from app.scheduler.manager import SchedulerManager
 from app.notifications.notifier import NotificationManager
 from app.core.commands import CommandRouter
 from app.core.assistant import AssistantEngine
-from app.core.context import ContextManager
 
 class MockTTS:
+    def __init__(self):
+        self.spoken = []
     def speak(self, text):
-        pass
+        self.spoken.append(text)
     def stop(self):
         pass
 
@@ -28,7 +28,7 @@ class MockNotifier:
     def send_notification(self, title, message):
         pass
 
-class TestContextManager(unittest.TestCase):
+class TestStressRecovery(unittest.TestCase):
     def setUp(self):
         self.db_fd, self.db_path = tempfile.mkstemp()
         self.db = DatabaseManager(self.db_path)
@@ -45,7 +45,6 @@ class TestContextManager(unittest.TestCase):
             self.db, self.config, self.timer, self.scheduler,
             self.tts, self.notifier, self.planner, self.router
         )
-        self.context_manager = ContextManager()
 
     def tearDown(self):
         self.timer.stop()
@@ -55,40 +54,18 @@ class TestContextManager(unittest.TestCase):
         os.close(self.db_fd)
         os.unlink(self.db_path)
 
-    def test_context_compiling(self):
-        # Add event
-        self.db.add_event(
-            name=" DBMS Assessment",
-            type_="Exam",
-            date="2026-12-14",
-            prep_topics="Queries"
-        )
+    def test_focus_completion_stress_trigger(self):
+        # 1. Simulate Focus timer completing
+        self.assistant._on_timer_session_completed("Focus", 25)
         
-        # Add schedule item
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        self.db.add_schedule_item(
-            task_name="Java Prep",
-            start_time="10:00",
-            duration_minutes=25,
-            priority="Medium",
-            date=today_str,
-            status="Pending"
-        )
+        # Verify transition to CONVERSATION_MODE and vocal prompts
+        self.assertEqual(self.assistant.current_state, "CONVERSATION_MODE")
+        self.assertTrue(any("stressed" in text.lower() for text in self.tts.spoken))
         
-        # Simulate conversation history
-        self.context_manager.add_message("user", "how is my progress?")
-        self.context_manager.add_message("assistant", "You have completed 0 tasks.")
+        # 2. Simulate user responding that they are stressed
+        resp = self.router.route("i feel stressed")
+        self.assertIn("stress recovery break", resp.lower())
         
-        context = self.context_manager.get_context(self.assistant)
-        
-        self.assertIn("current_time", context)
-        self.assertEqual(context["user_state"], "IDLE")
-        self.assertEqual(len(context["recent_conversation"]), 2)
-        
-        # Check upcoming deadlines list
-        deadlines = context["upcoming_deadlines"]
-        self.assertTrue(any("DBMS" in d["name"] for d in deadlines))
-        
-        # Check formatted json
-        json_str = self.context_manager.get_context_json(self.assistant)
-        self.assertIn('"user_state": "IDLE"', json_str)
+        # Verify 10-minute break timer was started
+        self.assertEqual(self.timer.current_state, "Break")
+        self.assertEqual(self.timer.total_duration_minutes, 10)

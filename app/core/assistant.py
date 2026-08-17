@@ -227,6 +227,11 @@ class AssistantEngine(QObject):
             title="Session Complete!",
             message=f"Your {session_type} session of {duration_minutes} minutes has finished."
         )
+        
+        if session_type == "Focus":
+            prompt = "Focus session completed! Great job. How are you feeling? If you're feeling stressed, we can do a ten-minute recovery break."
+            self._speak_and_log("System", prompt, state="CONVERSATION_MODE")
+            self._trigger_conversational_listening(prompt)
 
     # --- SCHEDULER SIGNALS INTERACTION ---
     def _on_distraction_detected(self, window_title):
