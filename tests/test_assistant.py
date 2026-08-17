@@ -96,3 +96,34 @@ class TestAssistantEngine(unittest.TestCase):
         self.assertEqual(self.assistant.current_state, "TASK_UPCOMING")
         self.assertTrue(any("starts in 10 minutes" in text for text in self.tts.spoken))
         self.assertTrue(any("Java Tutorial" in notification[1] for notification in self.notifier.notifications))
+
+    def test_skipped_task_rescheduling(self):
+        # Insert a pending schedule item for today starting 31 minutes ago
+        now = datetime.now()
+        target_time = now - timedelta(minutes=31)
+        time_str = target_time.strftime("%H:%M")
+        today_str = now.strftime("%Y-%m-%d")
+        
+        task_id = self.db.add_schedule_item(
+            task_name="DBMS Revision",
+            start_time=time_str,
+            duration_minutes=25,
+            priority="High",
+            date=today_str,
+            status="Pending"
+        )
+        
+        # Force a ticker check
+        self.assistant._check_proactive_schedule()
+        
+        # Verify state transition to TASK_SKIPPED
+        self.assertEqual(self.assistant.current_state, "TASK_SKIPPED")
+        
+        # Check that original task is marked Rescheduled, and a new one is created today
+        schedule = self.db.get_schedule_for_date(today_str)
+        self.assertEqual(len(schedule), 2)
+        
+        statuses = [item['status'] for item in schedule]
+        self.assertIn("Rescheduled", statuses)
+        self.assertIn("Pending", statuses)
+

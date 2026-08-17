@@ -205,7 +205,8 @@ class AssistantEngine(QObject):
             except Exception:
                 continue
                 
-            time_diff = (start_dt - now).total_seconds()
+            now_stripped = now.replace(second=0, microsecond=0)
+            time_diff = (start_dt - now_stripped).total_seconds()
             
             if task_id not in self.spoken_reminders:
                 self.spoken_reminders[task_id] = []
@@ -256,5 +257,5 @@ class AssistantEngine(QObject):
                     self._speak_and_log("Alert", f"You missed your scheduled task: {task_name}. Let's reschedule it for later.", state="TASK_SKIPPED")
                     
                     # Call dynamic rescheduling heuristics
-                    self.planner.postpone_next_task()
+                    self.planner.reschedule_task(task_id)
                     self.schedule_updated.emit()
