@@ -20,7 +20,7 @@ class TestAIOrchestrator(unittest.TestCase):
         self.assertIsNone(orchestrator.openrouter_provider)
         
         response = orchestrator.get_response("hello")
-        self.assertIn("greetings", response.lower() or "focusbuddy" in response.lower() or "support" in response.lower())
+        self.assertTrue(any(x in response.lower() for x in ["hello", "focusbuddy", "support"]))
 
     def test_error_handling_fallback(self):
         # Configure orchestrator with a mock failed provider
