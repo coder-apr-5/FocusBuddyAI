@@ -232,6 +232,13 @@ class AssistantEngine(QObject):
             prompt = "Focus session completed! Great job. How are you feeling? If you're feeling stressed, we can do a ten-minute recovery break."
             self._speak_and_log("System", prompt, state="CONVERSATION_MODE")
             self._trigger_conversational_listening(prompt)
+        elif session_type == "Break" and duration_minutes == 10:
+            easiest = self.planner.get_easiest_task()
+            if easiest:
+                prompt = f"Welcome back! Your recovery break is complete. To regain your momentum, let's start with your easiest task: {easiest['task_name']}."
+            else:
+                prompt = "Welcome back! Your recovery break is complete. Let's get back to work."
+            self._speak_and_log("System", prompt, state="IDLE")
 
     # --- SCHEDULER SIGNALS INTERACTION ---
     def _on_distraction_detected(self, window_title):

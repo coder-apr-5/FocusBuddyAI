@@ -2,6 +2,8 @@ import os
 import sys
 import unittest
 import tempfile
+from datetime import datetime
+# pyrefly: ignore [missing-import]
 from PySide6.QtCore import QCoreApplication
 
 app = QCoreApplication.instance() or QCoreApplication([])
@@ -69,3 +71,30 @@ class TestStressRecovery(unittest.TestCase):
         # Verify 10-minute break timer was started
         self.assertEqual(self.timer.current_state, "Break")
         self.assertEqual(self.timer.total_duration_minutes, 10)
+
+    def test_easiest_task_recovery_suggestion(self):
+        # Insert tasks of different priorities today
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        self.db.add_schedule_item(
+            task_name="Hard Math Revision",
+            start_time="14:00",
+            duration_minutes=25,
+            priority="High",
+            date=today_str,
+            status="Pending"
+        )
+        self.db.add_schedule_item(
+            task_name="Clean Study Desk",
+            start_time="14:30",
+            duration_minutes=15,
+            priority="Low",
+            date=today_str,
+            status="Pending"
+        )
+        
+        # Simulate 10-minute break completing
+        self.assistant._on_timer_session_completed("Break", 10)
+        
+        # Verify it suggested the easiest task: "Clean Study Desk" (priority "Low")
+        self.assertTrue(any("Clean Study Desk" in text for text in self.tts.spoken))
+        self.assertEqual(self.assistant.current_state, "IDLE")

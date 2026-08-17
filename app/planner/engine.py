@@ -81,6 +81,26 @@ class PlannerEngine:
         finally:
             conn.close()
 
+    def get_easiest_task(self):
+        """Finds the lowest priority pending task today."""
+        conn = self.db.get_connection()
+        try:
+            cursor = conn.cursor()
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            cursor.execute("SELECT * FROM schedule_items WHERE date = ? AND status = 'Pending'", (today_str,))
+            items = cursor.fetchall()
+            if not items:
+                return None
+            
+            # Prioritize Low -> Medium -> High (easiest to hardest)
+            priority_weights = {"Low": 1, "Medium": 2, "High": 3}
+            # Convert SQLite rows to dict-like for easy sorting
+            items_list = [dict(item) for item in items]
+            sorted_items = sorted(items_list, key=lambda x: priority_weights.get(x['priority'], 2))
+            return sorted_items[0]
+        finally:
+            conn.close()
+
     def generate_daily_schedule(self):
         """
         Generates today's daily plan based on:

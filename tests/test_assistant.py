@@ -3,10 +3,10 @@ import sys
 import unittest
 import tempfile
 from datetime import datetime, timedelta
-from PySide6.QtCore import QCoreApplication
+from PySide6.QtWidgets import QApplication
 
-# Ensure QCoreApplication exists for PySide6 objects
-app = QCoreApplication.instance() or QCoreApplication([])
+# Ensure QApplication exists for PySide6 objects
+app = QApplication.instance() or QApplication([])
 
 from app.database.db import DatabaseManager
 from app.core.config import ConfigManager

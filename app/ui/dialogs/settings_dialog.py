@@ -70,12 +70,28 @@ class SettingsDialog(QDialog):
         self.gemini_key_input.setText(self.config.get("gemini_api_key", ""))
         form_layout.addRow("Gemini API Key:", self.gemini_key_input)
         
+        # Groq API Key
+        self.groq_key_input = QLineEdit(self)
+        self.groq_key_input.setEchoMode(QLineEdit.Password)
+        self.groq_key_input.setText(self.config.get("groq_api_key", ""))
+        form_layout.addRow("Groq API Key:", self.groq_key_input)
+        
+        # OpenRouter API Key
+        self.openrouter_key_input = QLineEdit(self)
+        self.openrouter_key_input.setEchoMode(QLineEdit.Password)
+        self.openrouter_key_input.setText(self.config.get("openrouter_api_key", ""))
+        form_layout.addRow("OpenRouter API Key:", self.openrouter_key_input)
+        
         layout.addLayout(form_layout)
         
         # Toggles
         self.voice_chk = QCheckBox("Voice Speech Enabled", self)
         self.voice_chk.setChecked(bool(self.config.get("voice_enabled", True)))
         layout.addWidget(self.voice_chk)
+        
+        self.wakeword_chk = QCheckBox("Enable Wake Word ('FocusBuddy')", self)
+        self.wakeword_chk.setChecked(bool(self.config.get("wake_word_enabled", True)))
+        layout.addWidget(self.wakeword_chk)
         
         self.monitor_chk = QCheckBox("Enable Active Window Monitoring", self)
         self.monitor_chk.setChecked(bool(self.config.get("distraction_monitoring", True)))
@@ -114,9 +130,12 @@ class SettingsDialog(QDialog):
         self.config.set("reminder_pref", self.remind_combo.currentText())
         self.config.set("distracting_websites", self.distract_input.text().strip())
         self.config.set("gemini_api_key", self.gemini_key_input.text().strip())
+        self.config.set("groq_api_key", self.groq_key_input.text().strip())
+        self.config.set("openrouter_api_key", self.openrouter_key_input.text().strip())
         
         # Settings triggers (calls logic behind toggles)
         self.config.set("voice_enabled", str(self.voice_chk.isChecked()))
+        self.config.set("wake_word_enabled", str(self.wakeword_chk.isChecked()))
         self.config.set("distraction_monitoring", str(self.monitor_chk.isChecked()))
         self.config.set("website_blocking", str(self.blocking_chk.isChecked()))
         self.config.set("startup_enabled", str(self.startup_chk.isChecked()))
