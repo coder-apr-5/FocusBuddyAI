@@ -2,6 +2,7 @@ import os
 import sys
 from datetime import datetime, timedelta
 from PySide6.QtCore import QObject, Signal, QTimer, Slot, Qt, QMetaObject, Q_ARG
+from app.core.context import ContextManager
 
 class AssistantEngine(QObject):
     # Signals for the GUI
@@ -25,6 +26,7 @@ class AssistantEngine(QObject):
         self.planner = planner
         self.router = command_router
         self.ai = None # Set later if needed
+        self.context_manager = ContextManager()
         
         # State Machine
         self.current_state = "IDLE"  # IDLE, FOCUS_ACTIVE, BREAK_ACTIVE, TASK_UPCOMING, TASK_DUE, TASK_OVERDUE, TASK_SKIPPED, USER_STUCK, USER_DISTRACTED, RECOVERY_MODE, CONVERSATION_MODE, QUIET_MODE
@@ -91,6 +93,7 @@ class AssistantEngine(QObject):
         self.tts.speak(text)
         self.add_log(category, text)
         self.response_emitted.emit(text)
+        self.context_manager.add_message("assistant", text)
         if state:
             self.set_state(state)
 
@@ -121,6 +124,7 @@ class AssistantEngine(QObject):
                 self.set_state("IDLE")
             return
             
+        self.context_manager.add_message("user", text)
         self.add_log("User Input", f'"{text}"')
         self.gui_status_changed.emit("Thinking")
         
@@ -129,10 +133,12 @@ class AssistantEngine(QObject):
         
         self.gui_status_changed.emit("Speaking")
         if response == "__TRIGGER_STUCK_MODE__":
+            self.context_manager.add_message("assistant", "Triggered Stuck Mode.")
             self.add_log("Assistant", "Triggering Stuck Recovery Mode.")
             self.set_state("USER_STUCK")
             self.stuck_wizard_triggered.emit()
         else:
+            self.context_manager.add_message("assistant", response)
             self.add_log("Assistant", response)
             self.response_emitted.emit(response)
             

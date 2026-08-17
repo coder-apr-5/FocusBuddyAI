@@ -1,17 +1,19 @@
 import os
-import google.generativeai as genai
+import json
+import requests
 from app.ai.prompts import SYSTEM_PROMPT, STUCK_MODE_SYSTEM
 
 class AIProvider:
-    def get_response(self, prompt: str) -> str:
+    def get_response(self, prompt: str, context_json: str = None) -> str:
         raise NotImplementedError
 
     def get_stuck_response(self, stage: int, user_input: str) -> str:
         raise NotImplementedError
 
 
-class RuleBasedProvider(AIProvider):
-    def get_response(self, prompt: str) -> str:
+class LocalProvider(AIProvider):
+    """Fallback offline local rule-based assistant."""
+    def get_response(self, prompt: str, context_json: str = None) -> str:
         p = prompt.lower().strip()
         
         # Simple local conversational intents
@@ -50,58 +52,205 @@ class RuleBasedProvider(AIProvider):
         return prompts.get(stage, "Let's keep coding! What's the next task?")
 
 
-class LLMProvider(AIProvider):
-    def __init__(self, api_key: str, fallback_provider: AIProvider):
-        self.api_key = api_key
-        self.fallback = fallback_provider
-        self.model = None
-        self.stuck_chat = None
-        
-        if api_key:
-            try:
-                genai.configure(api_key=api_key)
-                self.model = genai.GenerativeModel(
-                    model_name="gemini-1.5-flash",
-                    system_instruction=SYSTEM_PROMPT
-                )
-            except Exception as e:
-                print(f"[LLM Init Error] {e}. Falling back to Rule-Based AI.")
-                self.model = None
+# Backwards compatibility alias
+RuleBasedProvider = LocalProvider
 
-    def get_response(self, prompt: str) -> str:
-        if not self.model:
-            return self.fallback.get_response(prompt)
+
+class GroqProvider(AIProvider):
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.model = "llama-3.3-70b-versatile"
+
+    def get_response(self, prompt: str, context_json: str = None) -> str:
+        if not self.api_key:
+            raise ValueError("Groq API key not configured.")
         
-        try:
-            response = self.model.generate_content(prompt)
-            return response.text.strip()
-        except Exception as e:
-            print(f"[LLM Query Error] {e}. Using fallback.")
-            return self.fallback.get_response(prompt)
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        system_instruction = SYSTEM_PROMPT
+        if context_json:
+            system_instruction += f"\n\nCurrent Context:\n{context_json}"
+            
+        data = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 200,
+            "temperature": 0.7
+        }
+        
+        response = requests.post(url, headers=headers, json=data, timeout=8.0)
+        response.raise_for_status()
+        result = response.json()
+        return result["choices"][0]["message"]["content"].strip()
 
     def get_stuck_response(self, stage: int, user_input: str) -> str:
-        if not self.model:
-            return self.fallback.get_stuck_response(stage, user_input)
+        if not self.api_key:
+            raise ValueError("Groq API key not configured.")
             
-        try:
-            # Let Gemini generate a customized Socratic hint based on the stage and input
-            prompt = f"""
-            The user is STUCK on a task.
-            Current stuck wizard stage: {stage}/5.
-            User's latest input: "{user_input}"
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        prompt = f"The user is STUCK on a task. Current stuck wizard stage: {stage}/5. User's latest input: '{user_input}'. Guidelines: Stage 0: Prompt user to explain. Stage 1: Ask for input/output. Stage 2: Prompt small manual example. Stage 3: Give small conceptual hint (no code). Stage 4: Give stronger hint (e.g. pseudocode). Stage 5: Full solution. Generate response for Stage {stage} under 4 sentences."
+        
+        data = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": STUCK_MODE_SYSTEM},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 150,
+            "temperature": 0.7
+        }
+        
+        response = requests.post(url, headers=headers, json=data, timeout=8.0)
+        response.raise_for_status()
+        result = response.json()
+        return result["choices"][0]["message"]["content"].strip()
+
+
+class GeminiProvider(AIProvider):
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.model = "gemini-1.5-flash"
+
+    def get_response(self, prompt: str, context_json: str = None) -> str:
+        if not self.api_key:
+            raise ValueError("Gemini API key not configured.")
             
-            Follow the stage guidelines:
-            Stage 0: Prompt the user to explain the problem.
-            Stage 1: Ask for input/output specifications.
-            Stage 2: Prompt the user to walk through a small example manually.
-            Stage 3: Give a small conceptual hint (no code).
-            Stage 4: Give a stronger hint (e.g. pseudocode, outline).
-            Stage 5: Give the full solution and explain it.
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        system_instruction = SYSTEM_PROMPT
+        if context_json:
+            system_instruction += f"\n\nCurrent Context:\n{context_json}"
             
-            Generate a supportive response suitable for Stage {stage}. Keep it under 4 sentences.
-            """
-            response = self.model.generate_content(prompt)
-            return response.text.strip()
-        except Exception as e:
-            print(f"[LLM Stuck Error] {e}. Using fallback.")
-            return self.fallback.get_stuck_response(stage, user_input)
+        data = {
+            "contents": [
+                {
+                    "parts": [{"text": prompt}]
+                }
+            ],
+            "systemInstruction": {
+                "parts": [{"text": system_instruction}]
+            },
+            "generationConfig": {
+                "maxOutputTokens": 200,
+                "temperature": 0.7
+            }
+        }
+        
+        response = requests.post(url, headers=headers, json=data, timeout=8.0)
+        response.raise_for_status()
+        result = response.json()
+        
+        # Parse response content
+        return result["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+    def get_stuck_response(self, stage: int, user_input: str) -> str:
+        if not self.api_key:
+            raise ValueError("Gemini API key not configured.")
+            
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model}:generateContent?key={self.api_key}"
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        prompt = f"The user is STUCK on a task. Current stuck wizard stage: {stage}/5. User's latest input: '{user_input}'. Guidelines: Stage 0: Prompt user to explain. Stage 1: Ask for input/output. Stage 2: Prompt small manual example. Stage 3: Give small conceptual hint (no code). Stage 4: Give stronger hint (e.g. pseudocode). Stage 5: Full solution. Generate response for Stage {stage} under 4 sentences."
+        
+        data = {
+            "contents": [
+                {
+                    "parts": [{"text": prompt}]
+                }
+            ],
+            "systemInstruction": {
+                "parts": [{"text": STUCK_MODE_SYSTEM}]
+            },
+            "generationConfig": {
+                "maxOutputTokens": 150,
+                "temperature": 0.7
+            }
+        }
+        
+        response = requests.post(url, headers=headers, json=data, timeout=8.0)
+        response.raise_for_status()
+        result = response.json()
+        return result["candidates"][0]["content"]["parts"][0]["text"].strip()
+
+
+class OpenRouterProvider(AIProvider):
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.model = "google/gemini-2.5-flash:free" # Default free model
+
+    def get_response(self, prompt: str, context_json: str = None) -> str:
+        if not self.api_key:
+            raise ValueError("OpenRouter API key not configured.")
+            
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/FocusBuddyAI",
+            "X-Title": "FocusBuddy AI"
+        }
+        
+        system_instruction = SYSTEM_PROMPT
+        if context_json:
+            system_instruction += f"\n\nCurrent Context:\n{context_json}"
+            
+        data = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 200,
+            "temperature": 0.7
+        }
+        
+        response = requests.post(url, headers=headers, json=data, timeout=8.0)
+        response.raise_for_status()
+        result = response.json()
+        return result["choices"][0]["message"]["content"].strip()
+
+    def get_stuck_response(self, stage: int, user_input: str) -> str:
+        if not self.api_key:
+            raise ValueError("OpenRouter API key not configured.")
+            
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/FocusBuddyAI",
+            "X-Title": "FocusBuddy AI"
+        }
+        
+        prompt = f"The user is STUCK on a task. Current stuck wizard stage: {stage}/5. User's latest input: '{user_input}'. Guidelines: Stage 0: Prompt user to explain. Stage 1: Ask for input/output. Stage 2: Prompt small manual example. Stage 3: Give small conceptual hint (no code). Stage 4: Give stronger hint (e.g. pseudocode). Stage 5: Full solution. Generate response for Stage {stage} under 4 sentences."
+        
+        data = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": STUCK_MODE_SYSTEM},
+                {"role": "user", "content": prompt}
+            ],
+            "max_tokens": 150,
+            "temperature": 0.7
+        }
+        
+        response = requests.post(url, headers=headers, json=data, timeout=8.0)
+        response.raise_for_status()
+        result = response.json()
+        return result["choices"][0]["message"]["content"].strip()
