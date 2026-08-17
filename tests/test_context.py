@@ -3,9 +3,9 @@ import sys
 import unittest
 import tempfile
 from datetime import datetime, timedelta
-from PySide6.QtCore import QCoreApplication
+from PySide6.QtWidgets import QApplication
 
-app = QCoreApplication.instance() or QCoreApplication([])
+app = QApplication.instance() or QApplication([])
 
 from app.database.db import DatabaseManager
 from app.core.config import ConfigManager
@@ -52,6 +52,8 @@ class TestContextManager(unittest.TestCase):
         self.scheduler.alert_timer.stop()
         self.scheduler.monitor_timer.stop()
         self.assistant.shutdown()
+        import time
+        time.sleep(0.2)
         os.close(self.db_fd)
         os.unlink(self.db_path)
 

@@ -55,6 +55,8 @@ class TestAssistantEngine(unittest.TestCase):
         self.scheduler.alert_timer.stop()
         self.scheduler.monitor_timer.stop()
         self.assistant.shutdown()
+        import time
+        time.sleep(0.2)
         os.close(self.db_fd)
         os.unlink(self.db_path)
 
